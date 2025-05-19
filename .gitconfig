@@ -1,0 +1,47 @@
+[core]
+	excludesfile = /Users/jordanpeck-snowplow/.gitignore_global
+	editor = cursor --wait
+	whitespace = fix,-indent-with-non-tab,trailing-space,cr-at-eol
+	fileMode = false
+[difftool "sourcetree"]
+	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
+	path = 
+[mergetool "sourcetree"]
+	cmd = /Applications/SourceTree.app/Contents/Resources/opendiff-w.sh \"$LOCAL\" \"$REMOTE\" -ancestor \"$BASE\" -merge \"$MERGED\"
+	trustExitCode = true
+[user]
+	name = Jordan Peck
+	email = jordan1peck@googlemail.com
+[commit]
+	template = /Users/jordanpeck-snowplow/.stCommitMsg
+[credential]
+	helper = 
+	helper = /usr/local/share/gcm-core/git-credential-manager
+[credential "https://dev.azure.com"]
+	useHttpPath = true
+[safe]
+	bareRepository = explicit
+	bareRepository = all
+[push]
+	autoSetupRemote = true
+[pull]
+	rebase = false
+[diff]
+	algorithm = histogram
+	compactHeuristic = true
+[log]
+	decorate = short
+[format]
+	pretty = oneline
+[alias]
+	lg = log --oneline --graph --all --decorate
+	co = checkout
+	st = status
+[help]
+	autoCorrect = 1
+[merge]
+	ff = only
+[fetch]
+	prune = true
+[init]
+	defaultBranch = main
