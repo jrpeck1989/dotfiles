@@ -8,11 +8,12 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-export PATH="$PATH:/Users/jordanpeck-snowplow"
+export PATH="$PATH:$HOME"
 # If you come from bash you might have to change your $PATH.
 export PATH=$HOME/bin:/usr/local/bin:$PATH
+export PATH="/usr/local/opt/postgresql@16/bin:$PATH"
 # Path to your oh-my-zsh installation.
-export ZSH="/Users/jordanpeck-snowplow/.oh-my-zsh"
+export ZSH="$HOME/.oh-my-zsh"
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
@@ -133,7 +134,7 @@ function docker-rmi() {
   docker images -f "dangling=true" -q | while read id; do docker rmi $id; done
 }
 
-export VAULT_ADDR=https://vault.snplow.net
+export VAULT_ADDR={{VAULT_ADDR}}
 __vault_token_path=~/.vault-token
 __tf_secrets_dir=~/.tf_secrets
 
@@ -185,7 +186,7 @@ function prod-grafana-creds() {
     echo "${grafana_auth}" > "${grafana_auth_path}"
   fi
 
-  export GRAFANA_URL="https://grafana.snplow.net"
+export GRAFANA_URL="{{GRAFANA_URL}}"
   export GRAFANA_AUTH="${grafana_auth}"
 
   echo "Prod Grafana credentials set."
@@ -209,7 +210,7 @@ function prod-github-token() {
   echo "Prod GitHub credentials set."
 }
 
-export CONSUL_HTTP_ADDR=consul.snplow.net:443;
+export CONSUL_HTTP_ADDR={{CONSUL_HTTP_ADDR}};
 export CONSUL_SCHEME=https;
 export CONSUL_HTTP_SSL=true;
 
@@ -217,7 +218,7 @@ function get-prod-consul-token() {
   vault read consul/creds/services | grep token | rev | cut -d " " -f1 | rev
 }
 
-export GH_TOKEN="xxxxxx"
+export GH_TOKEN="{{GH_TOKEN}}"
 export GH_EDITOR="cursor -w"
 
 function vault_auth {
@@ -233,29 +234,155 @@ function vault_auth {
 }
 
 function run_micro() {
-    local WATCHED_DIR="/Users/jordanpeck-snowplow/Documents/snowplow-micro/example"
-    local IMAGE_NAME="snowplow/snowplow-micro:2.1.2"
+local WATCHED_DIR="$HOME/Documents/snowplow-micro/example"
+    local IMAGE_NAME="snowplow/snowplow-micro:latest"
+    local CONTAINER_NAME="micro"
+    local WATCHER_PID
 
-    function reload_container() {
-        echo "Changes detected in $WATCHED_DIR. Reloading Docker container..."
-        docker stop $(docker ps -q --filter ancestor=$IMAGE_NAME)
-        run_micro
-        echo "Docker container reloaded."
+    # Cleanup function to be called on exit
+    function cleanup() {
+        echo -e "\nStopping processes..."
+        # Kill the file watcher if it's running
+        if [[ -n "$WATCHER_PID" ]]; then
+            kill "$WATCHER_PID" 2>/dev/null
+        fi
+        # Stop the docker container
+        docker stop "$CONTAINER_NAME" &>/dev/null || true
+        echo "Cleanup complete. Exiting."
     }
 
-    # Initial run
-    echo "Starting initial Docker container..."
+    # Set up trap to call cleanup on script exit (Ctrl+C)
+    trap cleanup INT TERM EXIT
 
-    docker run --name micro -p 9090:9090 \
-    --mount type=bind,source=/Users/jordanpeck-snowplow/Documents/snowplow-micro/example/enrichments,destination=/enrichments \
-    --mount type=bind,source=/Users/jordanpeck-snowplow/Documents/snowplow-micro/example/,destination=/config \
-    $IMAGE_NAME
+    # Start the file watcher in the background.
+    # When it detects a change, it just stops the container,
+    # which will cause the 'docker logs' command to exit and the main loop to restart.
+    (fswatch -o "$WATCHED_DIR" | while read -r; do
+        echo -e "\n--- Change detected, restarting container ---"
+        docker stop "$CONTAINER_NAME" >/dev/null
+    done) &
+    WATCHER_PID=$!
 
-    # Monitor the directory for changes
-    echo "Monitoring $WATCHED_DIR for changes..."
-    fswatch -o $WATCHED_DIR | while read f; do
-        echo "Change detected"
-        reload_container
+    # Main loop
+    while true; do
+        echo "Starting container '$CONTAINER_NAME'..."
+        docker run --rm -d --name "$CONTAINER_NAME" -p 9090:9090 \
+            --mount type=bind,source="$WATCHED_DIR/enrichments",destination=/enrichments \
+            --mount type=bind,source="$WATCHED_DIR",destination=/config \
+            "$IMAGE_NAME" >/dev/null
+
+        # Check if the container started successfully
+        if ! docker ps -q --filter "name=$CONTAINER_NAME" | grep -q .; then
+            echo "Error: Container failed to start."
+            # Wait before trying again
+            sleep 5
+            continue
+        fi
+
+        echo "Tailing logs... (Press Ctrl+C to exit)"
+        # This command will block until the container is stopped
+        docker logs -f "$CONTAINER_NAME"
+        
+        # Add a small delay to prevent rapid looping if 'docker logs' exits unexpectedly
+        sleep 1
+    done
+}
+
+function run_micro_dev() {
+    # 1. Dependency checks
+    if ! command -v fswatch &> /dev/null; then
+        echo "Error: fswatch is not installed. Please install it to continue." >&2
+        echo "On macOS, you can run: brew install fswatch" >&2
+        return 1
+    fi
+
+    if ! command -v docker &> /dev/null; then
+        echo "Error: Docker is not installed. Please install it to continue." >&2
+        return 1
+    fi
+
+    # 2. Configuration and path checks
+    local watched_dir="./example"
+    if [[ ! -d "$watched_dir" ]]; then
+        echo "Error: Directory to watch ('$watched_dir') not found." >&2
+        echo "Please make sure you are in the root of the 'snowplow-micro' project directory." >&2
+        return 1
+    fi
+    local image_name="snowplow/snowplow-micro:latest"
+    local container_name="snowplow-micro-dev"
+    local watcher_pid
+
+    # 3. Cleanup function for graceful shutdown
+    function cleanup() {
+        echo -e "\n\nSIGINT received, shutting down..."
+        
+        # Disable the trap to prevent re-entrant calls
+        trap - INT TERM
+
+        # Stop the file watcher
+        if [[ -n "$watcher_pid" ]] && ps -p "$watcher_pid" > /dev/null; then
+            echo "Stopping file watcher (PID: $watcher_pid)..."
+            kill "$watcher_pid" 2>/dev/null
+        fi
+
+        # Stop and remove the Docker container
+        echo "Stopping and removing Docker container '$container_name'..."
+        if docker ps -a -q --filter "name=$container_name" | grep -q .; then
+            docker rm -f "$container_name" > /dev/null
+        fi
+        
+        echo "Shutdown complete. Goodbye!"
+        # Exit the script with a standard code for interruption
+        exit 130
+    }
+
+    trap cleanup INT TERM
+
+    # 4. Initial cleanup of any orphaned container
+    echo "Checking for and removing any old '$container_name' containers..."
+    if docker ps -a -q --filter "name=$container_name" | grep -q .; then
+        docker rm -f "$container_name" > /dev/null
+    fi
+
+    # 5. Start file watcher
+    echo "Watching for file changes in '$watched_dir'..."
+    # -o batches events, -r is for recursive watching.
+    fswatch -or "$watched_dir" | while read -r event_path; do
+        echo "-> File change detected: $event_path"
+        echo "   Restarting Snowplow Micro container..."
+        if docker ps -q --filter "name=$container_name" | grep -q .; then
+            docker stop "$container_name" > /dev/null
+        fi
+    done &
+    watcher_pid=$!
+
+    # 6. Main loop to run and monitor Docker container
+    while true; do
+        echo "Starting Snowplow Micro container '$container_name'..."
+        docker run \
+            --rm \
+            -d \
+            --name "$container_name" \
+            -p 9090:9090 \
+            --mount type=bind,source="$(pwd)/$watched_dir/enrichments",destination=/enrichments \
+            --mount type=bind,source="$(pwd)/$watched_dir",destination=/config \
+            "$image_name" > /dev/null
+
+        if ! docker ps -q --filter "name=$container_name" | grep -q .; then
+            echo "Error: Container '$container_name' failed to start." >&2
+            echo "Will retry in 5 seconds..."
+            sleep 5
+            continue
+        fi
+
+        echo "Container started. Tailing logs... (Ctrl+C to stop)"
+        
+        # Block and stream logs. When container is stopped, this command will exit.
+        docker logs -f "$container_name"
+
+        # If the loop continues (e.g., container was stopped by fswatch), wait a moment.
+        # This also prevents fast-spinning loops if the container fails instantly.
+        sleep 0.5
     done
 }
 
@@ -270,7 +397,7 @@ function run-server() {
     exit 0
   }
 
-  http-server /Users/jordanpeck-snowplow/Developer/dev -p 8888 &
+http-server $HOME/Developer/dev -p 8888 &
   wait
 }
 
@@ -290,6 +417,10 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+export PATH="/Users/jordanpeck-snowplow/Documents/kafka_2.13-3.9.1/bin:$PATH"
+
+export NEON_API_KEY="{{NEON_API_KEY}}"
+
 
 source ~/powerlevel10k/powerlevel10k.zsh-theme
 
@@ -309,8 +440,8 @@ bindkey '^R' fzf-history-widget
 # Aliases
 alias pip=pip3
 alias python=python3
-alias authy="/Users/jordanpeck-snowplow/Developer/authy"
-alias snowplow-tracking-cli="/Users/jordanpeck-snowplow/snowplow-tracking-cli"
+alias authy="$HOME/Developer/authy"
+alias snowplow-tracking-cli="$HOME/snowplow-tracking-cli"
 alias cat="bat"
 alias zz="z -"
 alias c="cursor ."
@@ -339,7 +470,7 @@ _fzf_compgen_path() {
 }
 
 # Use fd to generate the list for directory completion
-_fzf_compgen_dir() {so
+_fzf_compgen_dir() {
   fd --type=d --hidden --exclude .git . "$1"
 }
 
@@ -382,10 +513,34 @@ _fzf_comprun() {
 }
 
 # The next line updates PATH for the Google Cloud SDK.
-if [ -f '/Users/jordanpeck-snowplow/google-cloud-sdk/path.zsh.inc' ]; then . '/Users/jordanpeck-snowplow/google-cloud-sdk/path.zsh.inc'; fi
+if [ -f '$HOME/google-cloud-sdk/path.zsh.inc' ]; then . '$HOME/google-cloud-sdk/path.zsh.inc'; fi
 
 # The next line enables shell command completion for gcloud.
-if [ -f '/Users/jordanpeck-snowplow/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/jordanpeck-snowplow/google-cloud-sdk/completion.zsh.inc'; fi
+if [ -f '$HOME/google-cloud-sdk/completion.zsh.inc' ]; then . '$HOME/google-cloud-sdk/completion.zsh.inc'; fi
+
+
+# Java Home
+export JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-15.0.2.jdk/Contents/Home"
+
+#compdef neon
+###-begin-neon-completions-###
+#
+# yargs command completion script
+#
+# Installation: neon completion >> ~/.zshrc
+#    or neon completion >> ~/.zprofile on OSX.
+#
+_neon_yargs_completions()
+{
+  local reply
+  local si=$IFS
+  IFS=$'
+' reply=($(COMP_CWORD="$((CURRENT-1))" COMP_LINE="$BUFFER" COMP_POINT="$CURSOR" neon --get-yargs-completions "${words[@]}"))
+  IFS=$si
+  _describe 'values' reply
+}
+compdef _neon_yargs_completions neon
+###-end-neon-completions-###
 
 # Amazon Q post block. Keep at the bottom of this file.
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
