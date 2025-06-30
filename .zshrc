@@ -8,7 +8,6 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-export PATH="$PATH:$HOME"
 # If you come from bash you might have to change your $PATH.
 export PATH=$HOME/bin:/usr/local/bin:$PATH
 export PATH="/usr/local/opt/postgresql@16/bin:$PATH"
@@ -235,7 +234,7 @@ function vault_auth {
 
 function run_micro() {
 local WATCHED_DIR="$HOME/Documents/snowplow-micro/example"
-    local IMAGE_NAME="snowplow/snowplow-micro:latest"
+    local IMAGE_NAME="snowplow/snowplow-micro:2.3.0"
     local CONTAINER_NAME="micro"
     local WATCHER_PID
 
@@ -308,7 +307,7 @@ function run_micro_dev() {
         echo "Please make sure you are in the root of the 'snowplow-micro' project directory." >&2
         return 1
     fi
-    local image_name="snowplow/snowplow-micro:latest"
+    local image_name="snowplow/snowplow-micro:2.3.0"
     local container_name="snowplow-micro-dev"
     local watcher_pid
 
@@ -333,7 +332,7 @@ function run_micro_dev() {
         
         echo "Shutdown complete. Goodbye!"
         # Exit the script with a standard code for interruption
-        exit 130
+        return 130
     }
 
     trap cleanup INT TERM
@@ -513,10 +512,10 @@ _fzf_comprun() {
 }
 
 # The next line updates PATH for the Google Cloud SDK.
-if [ -f '$HOME/google-cloud-sdk/path.zsh.inc' ]; then . '$HOME/google-cloud-sdk/path.zsh.inc'; fi
+if [ -f "$HOME/google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/google-cloud-sdk/path.zsh.inc"; fi
 
 # The next line enables shell command completion for gcloud.
-if [ -f '$HOME/google-cloud-sdk/completion.zsh.inc' ]; then . '$HOME/google-cloud-sdk/completion.zsh.inc'; fi
+if [ -f "$HOME/google-cloud-sdk/completion.zsh.inc" ]; then . "$HOME/google-cloud-sdk/completion.zsh.inc"; fi
 
 
 # Java Home
