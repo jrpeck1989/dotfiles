@@ -26,3 +26,31 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Environment files with sensitive information
+.env.local
+.env.*.local
+
+# Backup files
+*.backup
+*.bak
+.zshrc.backup
+
+# OS generated files
+.DS_Store?
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
